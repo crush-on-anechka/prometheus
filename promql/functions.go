@@ -33,6 +33,7 @@ import (
 	"github.com/prometheus/prometheus/promql/parser"
 	"github.com/prometheus/prometheus/promql/parser/posrange"
 	"github.com/prometheus/prometheus/util/annotations"
+	"github.com/prometheus/prometheus/util/kahansum"
 )
 
 // FunctionCall is the type of a PromQL function implementation
@@ -614,7 +615,7 @@ func funcAvgOverTime(vals []parser.Value, args parser.Expressions, enh *EvalNode
 		for _, f := range s.Floats {
 			count++
 			if !incrementalMean {
-				newSum, newC := kahanSumInc(f.F, sum, kahanC)
+				newSum, newC := kahansum.Inc(f.F, sum, kahanC)
 				// Perform regular mean calculation as long as
 				// the sum doesn't overflow and (in any case)
 				// for the first iteration (even if we start
@@ -647,7 +648,7 @@ func funcAvgOverTime(vals []parser.Value, args parser.Expressions, enh *EvalNode
 				}
 			}
 			correctedMean := mean + kahanC
-			mean, kahanC = kahanSumInc(f.F/count-correctedMean/count, mean, kahanC)
+			mean, kahanC = kahansum.Inc(f.F/count-correctedMean/count, mean, kahanC)
 		}
 		if incrementalMean {
 			return mean + kahanC
@@ -780,7 +781,7 @@ func funcSumOverTime(vals []parser.Value, args parser.Expressions, enh *EvalNode
 	return aggrOverTime(vals, enh, func(s Series) float64 {
 		var sum, c float64
 		for _, f := range s.Floats {
-			sum, c = kahanSumInc(f.F, sum, c)
+			sum, c = kahansum.Inc(f.F, sum, c)
 		}
 		if math.IsInf(sum, 0) {
 			return sum
@@ -829,8 +830,8 @@ func funcStddevOverTime(vals []parser.Value, args parser.Expressions, enh *EvalN
 		for _, f := range s.Floats {
 			count++
 			delta := f.F - (mean + cMean)
-			mean, cMean = kahanSumInc(delta/count, mean, cMean)
-			aux, cAux = kahanSumInc(delta*(f.F-(mean+cMean)), aux, cAux)
+			mean, cMean = kahansum.Inc(delta/count, mean, cMean)
+			aux, cAux = kahansum.Inc(delta*(f.F-(mean+cMean)), aux, cAux)
 		}
 		return math.Sqrt((aux + cAux) / count)
 	}), nil
@@ -852,8 +853,8 @@ func funcStdvarOverTime(vals []parser.Value, args parser.Expressions, enh *EvalN
 		for _, f := range s.Floats {
 			count++
 			delta := f.F - (mean + cMean)
-			mean, cMean = kahanSumInc(delta/count, mean, cMean)
-			aux, cAux = kahanSumInc(delta*(f.F-(mean+cMean)), aux, cAux)
+			mean, cMean = kahansum.Inc(delta/count, mean, cMean)
+			aux, cAux = kahansum.Inc(delta*(f.F-(mean+cMean)), aux, cAux)
 		}
 		return (aux + cAux) / count
 	}), nil
@@ -1052,21 +1053,6 @@ func funcTimestamp(vals []parser.Value, args parser.Expressions, enh *EvalNodeHe
 	return enh.Out, nil
 }
 
-func kahanSumInc(inc, sum, c float64) (newSum, newC float64) {
-	t := sum + inc
-	switch {
-	case math.IsInf(t, 0):
-		c = 0
-
-	// Using Neumaier improvement, swap if next term larger than sum.
-	case math.Abs(sum) >= math.Abs(inc):
-		c += (sum - t) + inc
-	default:
-		c += (inc - t) + sum
-	}
-	return t, c
-}
-
 // linearRegression performs a least-square linear regression analysis on the
 // provided SamplePairs. It returns the slope, and the intercept value at the
 // provided time.
@@ -1089,10 +1075,10 @@ func linearRegression(samples []FPoint, interceptTime int64) (slope, intercept f
 		}
 		n += 1.0
 		x := float64(sample.T-interceptTime) / 1e3
-		sumX, cX = kahanSumInc(x, sumX, cX)
-		sumY, cY = kahanSumInc(sample.F, sumY, cY)
-		sumXY, cXY = kahanSumInc(x*sample.F, sumXY, cXY)
-		sumX2, cX2 = kahanSumInc(x*x, sumX2, cX2)
+		sumX, cX = kahansum.Inc(x, sumX, cX)
+		sumY, cY = kahansum.Inc(sample.F, sumY, cY)
+		sumXY, cXY = kahansum.Inc(x*sample.F, sumXY, cXY)
+		sumX2, cX2 = kahansum.Inc(x*x, sumX2, cX2)
 	}
 	if constY {
 		if math.IsInf(initY, 0) {
@@ -1251,7 +1237,7 @@ func funcHistogramStdDev(vals []parser.Value, args parser.Expressions, enh *Eval
 				}
 			}
 			delta := val - mean
-			variance, cVariance = kahanSumInc(bucket.Count*delta*delta, variance, cVariance)
+			variance, cVariance = kahansum.Inc(bucket.Count*delta*delta, variance, cVariance)
 		}
 		variance += cVariance
 		variance /= sample.H.Count
@@ -1294,7 +1280,7 @@ func funcHistogramStdVar(vals []parser.Value, args parser.Expressions, enh *Eval
 				}
 			}
 			delta := val - mean
-			variance, cVariance = kahanSumInc(bucket.Count*delta*delta, variance, cVariance)
+			variance, cVariance = kahansum.Inc(bucket.Count*delta*delta, variance, cVariance)
 		}
 		variance += cVariance
 		variance /= sample.H.Count
