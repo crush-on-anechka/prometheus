@@ -397,6 +397,10 @@ func (h *FloatHistogram) KahanAdd(other, c *FloatHistogram) (newH *FloatHistogra
 
 	h.adjustCounterResetForAddition(other)
 
+	if c == nil {
+		c = h.newCompensationHistogram()
+	}
+
 	if !h.UsesCustomBuckets() {
 		otherZeroCount := h.reconcileZeroBuckets(other)
 		h.ZeroCount, c.ZeroCount = kahansum.Inc(otherZeroCount, h.ZeroCount, c.ZeroCount)
@@ -506,6 +510,10 @@ func (h *FloatHistogram) Sub(other *FloatHistogram) (*FloatHistogram, error) {
 func (h *FloatHistogram) KahanSub(other, c *FloatHistogram) (newH *FloatHistogram, newC *FloatHistogram, err error) {
 	if err := h.checkSchemaAndBounds(other); err != nil {
 		return nil, nil, err
+	}
+
+	if c == nil {
+		c = h.newCompensationHistogram()
 	}
 
 	if !h.UsesCustomBuckets() {
@@ -1593,12 +1601,12 @@ func (h *FloatHistogram) ReduceResolution(targetSchema int32) *FloatHistogram {
 	return h
 }
 
-// NewCompensationHistogram initializes a new compensation histogram that can be used
+// newCompensationHistogram initializes a new compensation histogram that can be used
 // alongside the current FloatHistogram in Kahan summation.
 // The compensation histogram is structured to match the receiving histogram's bucket
 // layout including its schema and custom values, and it shares spans with the receiving histogram.
 // However, the bucket values in the compensation histogram are initialized to zero.
-func (h *FloatHistogram) NewCompensationHistogram() *FloatHistogram {
+func (h *FloatHistogram) newCompensationHistogram() *FloatHistogram {
 	c := &FloatHistogram{
 		Schema:          h.Schema,
 		CustomValues:    h.CustomValues,
