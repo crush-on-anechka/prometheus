@@ -582,6 +582,7 @@ func funcAvgOverTime(vals []parser.Value, args parser.Expressions, enh *EvalNode
 		vec, err := aggrHistOverTime(vals, enh, func(s Series) (*histogram.FloatHistogram, error) {
 			count := 1
 			mean := s.Histograms[0].H.Copy()
+			var comp *histogram.FloatHistogram
 			for _, h := range s.Histograms[1:] {
 				count++
 				left := h.H.Copy().Div(float64(count))
@@ -590,8 +591,12 @@ func funcAvgOverTime(vals []parser.Value, args parser.Expressions, enh *EvalNode
 				if err != nil {
 					return mean, err
 				}
-				_, err = mean.Add(toAdd)
+				_, comp, err = mean.KahanAdd(toAdd, comp)
 				if err != nil {
+					return mean, err
+				}
+				if comp != nil {
+					mean, err = mean.Add(comp)
 					return mean, err
 				}
 			}
@@ -760,13 +765,18 @@ func funcSumOverTime(vals []parser.Value, args parser.Expressions, enh *EvalNode
 		// The passed values only contain histograms.
 		vec, err := aggrHistOverTime(vals, enh, func(s Series) (*histogram.FloatHistogram, error) {
 			sum := s.Histograms[0].H.Copy()
+			var comp *histogram.FloatHistogram
+			var err error
 			for _, h := range s.Histograms[1:] {
-				_, err := sum.Add(h.H)
+				_, comp, err = sum.KahanAdd(h.H, comp)
 				if err != nil {
 					return sum, err
 				}
 			}
-			return sum, nil
+			if comp != nil {
+				sum, err = sum.Add(comp)
+			}
+			return sum, err
 		})
 		if err != nil {
 			metricName := firstSeries.Metric.Get(labels.MetricName)
